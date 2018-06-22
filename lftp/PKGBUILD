@@ -2,7 +2,7 @@
 # Contributor: Jürgen Pfeifer <juergen@familiepfeifer.de>
 
 pkgname=lftp
-pkgver=4.7.8
+pkgver=4.8.3
 pkgrel=1
 pkgdesc="Sophisticated command line based FTP client (net-utils)"
 arch=('i686' 'x86_64')
@@ -16,6 +16,7 @@ depends=('gcc-libs'
          'libgnutls'
          'libiconv'
          'libidn'
+         'libidn2'
          'libintl'
          'libhogweed'
          'libnettle'
@@ -31,6 +32,7 @@ makedepends=('gcc'
              'libgnutls-devel'
              'libiconv-devel'
              'libidn-devel'
+             'libidn2-devel'
              'libnettle-devel'
              'libp11-kit-devel'
              'libreadline-devel'
@@ -58,7 +60,7 @@ sha256sums=('f18a166dc50e0e32d45b6d0128bad0e6970386f6a50cf5cadb0995b256d532a6'
 prepare() {
   cd ${srcdir}/${pkgname}-${pkgver}
   patch -p1 -i ${srcdir}/lftp-configure-needtrio.patch
-  patch -p1 -i ${srcdir}/lftp-configure-readline.patch
+  #patch -p1 -i ${srcdir}/lftp-configure-readline.patch
   patch -p1 -i ${srcdir}/lftp-4.7.8-msysize.patch
   patch -p1 -i ${srcdir}/lftp-4.7.6-no-undefined.patch
   patch -p1 -i ${srcdir}/lftp-correct-gettext-macros.patch
