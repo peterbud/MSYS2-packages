@@ -1,0 +1,153 @@
+--- a/Configurations/10-main.conf	2018-03-27 15:50:37.000000000 +0200
++++ b/Configurations/10-main.conf	2018-07-29 12:58:56.119443800 +0200
+@@ -1537,6 +1537,40 @@
+         shared_ldflag    => "-shared",
+         shared_extension => ".dll",
+     },
++
++#### MSYS
++    "Msys-x86" => {
++        inherit_from     => [ "BASE_unix", asm("x86_asm") ],
++        cc               => "gcc",
++        cflags           => picker(default => "-DTERMIOS -DL_ENDIAN -Wall",
++                                   debug   => "-g -O0",
++                                   release => "-O3 -fomit-frame-pointer"),
++        sys_id           => "MSYS",
++        bn_ops           => "BN_LLONG",
++        thread_scheme    => "pthread",
++        perlasm_scheme   => "coff",
++        dso_scheme       => "dlfcn",
++        shared_target    => "msys-shared",
++        shared_cflag     => add("-D_WINDLL"),
++        shared_ldflag    => "-shared",
++        shared_extension => ".dll",
++    },
++    "Msys-x86_64" => {
++        inherit_from     => [ "BASE_unix", asm("x86_64_asm") ],
++        cc               => "gcc",
++        cflags           => picker(default => "-DTERMIOS -DL_ENDIAN -Wall",
++                                   debug   => "-g -O0",
++                                   release => "-O3"),
++        sys_id           => "MSYS",
++        bn_ops           => "SIXTY_FOUR_BIT_LONG",
++        thread_scheme    => "pthread",
++        perlasm_scheme   => "mingw64",
++        dso_scheme       => "dlfcn",
++        shared_target    => "msys-shared",
++        shared_cflag     => add("-D_WINDLL"),
++        shared_ldflag    => "-shared",
++        shared_extension => ".dll",
++    },    
+     # Backward compatibility for those using this target
+     "Cygwin" => {
+ 	inherit_from     => [ "Cygwin-x86" ]
+--- a/Makefile.shared	2018-03-27 15:50:37.000000000 +0200
++++ b/Makefile.shared	2018-07-29 14:44:37.169344200 +0200
+@@ -253,6 +253,28 @@
+ link_app.cygwin:
+ 	$(LINK_APP)
+ 
++# link_dso.msys-shared and symlink.msys-shared are mapped to the
++# corresponding cygwin targets, as they do the exact same thing.
++link_shlib.msys:
++	@ INHIBIT_SYMLINKS=yes; \
++   SHLIBNAME=msys-$(SHLIBNAME); SHLIBNAME_FULL=msys-$(SHLIBNAME_FULL); \
++	dll_name=$$SHLIB$$SHLIB_SOVER$$SHLIB_SUFFIX; extras=; \
++	echo "$(PERL) $(SRCDIR)/util/mkrc.pl $(SHLIBNAME_FULL) |" \
++		     "$(RC) $(SHARED_RCFLAGS) -o rc.o"; \
++	$(PERL) $(SRCDIR)/util/mkrc.pl $(SHLIBNAME_FULL) | \
++		$(RC) $(SHARED_RCFLAGS) -o rc.o; \
++	ALLSYMSFLAGS='-Wl,--whole-archive'; \
++	NOALLSYMSFLAGS='-Wl,--no-whole-archive'; \
++	SHAREDFLAGS="$(CFLAGS) $(SHARED_LDFLAGS) -shared -Wl,--enable-auto-image-base -Wl,-Bsymbolic -Wl,--out-implib,$(SHLIBNAME) rc.o"; \
++	$(LINK_SO_SHLIB) || exit 1; \
++	rm rc.o
++link_app.msys:
++	@if expr "$(CFLAGS)" : '.*OPENSSL_USE_APPLINK' > /dev/null; then \
++		LIBDEPS="$(TOP)/crypto/applink.o $${LIBDEPS:-$(LIBDEPS)}"; \
++		export LIBDEPS; \
++	fi; \
++	$(LINK_APP)
++
+ # link_dso.mingw-shared and link_app.mingw-shared are mapped to the
+ # corresponding cygwin targets, as they do the exact same thing.
+ link_shlib.mingw:
+@@ -479,6 +501,10 @@
+ link_shlib.cygwin-shared: link_shlib.cygwin
+ link_app.cygwin-shared: link_app.cygwin
+ symlink.cygwin-shared: symlink.cygwin
++link_dso.msys-shared: link_dso.cygwin
++link_shlib.msys-shared: link_shlib.msys
++link_app.msys-shared: link_app.msys
++symlink.msys-shared: symlink.cygwin
+ link_dso.mingw-shared: link_dso.cygwin
+ link_shlib.mingw-shared: link_shlib.mingw
+ link_app.mingw-shared: link_app.cygwin
+--- a/build.info	2018-03-27 15:50:37.000000000 +0200
++++ b/build.info	2018-07-29 16:24:00.510737500 +0200
+@@ -23,6 +23,9 @@
+ ELSIF[{- $config{target} =~ /^mingw/ -}]
+  SHARED_NAME[libcrypto]=libcrypto-{- $config{shlib_major}."_".$config{shlib_minor} -}{- $config{target} eq "mingw64" ? "-x64" : "" -}
+  SHARED_NAME[libssl]=libssl-{- $config{shlib_major}."_".$config{shlib_minor} -}{- $config{target} eq "mingw64" ? "-x64" : "" -}
++ELSIF[{- $config{target} =~ /^Msys/ -}]
++ SHARED_NAME[libcrypto]=msys-libcrypto-{- $config{shlib_major}.".".$config{shlib_minor} -}
++ SHARED_NAME[libssl]=msys-libssl-{- $config{shlib_major}.".".$config{shlib_minor} -}
+ ELSIF[{- $config{target} =~ /^VC-/ -}]
+  SHARED_NAME[libcrypto]=libcrypto-{- $config{shlib_major}."_".$config{shlib_minor} -}{- $target{multilib} -}
+  SHARED_NAME[libssl]=libssl-{- $config{shlib_major}."_".$config{shlib_minor} -}{- $target{multilib} -}
+--- a/Configure	2018-03-27 15:50:37.000000000 +0200
++++ b/Configure	2018-07-29 16:42:52.280898500 +0200
+@@ -300,6 +300,7 @@
+ $config{baseaddr}="0xFB00000";
+ my $auto_threads=1;    # enable threads automatically? true by default
+ my $default_ranlib;
++my $enginesdir="";
+ $config{fips}=0;
+ 
+ # Top level directories to build
+@@ -677,6 +678,10 @@
+ 			{
+ 			$config{openssldir}=$1;
+ 			}
++		elsif (/^--enginesdir=(.*)$/)
++			{
++			$config{enginesdir}=$1;
++			}            
+ 		elsif (/^--with-zlib-lib=(.*)$/)
+ 			{
+ 			$withargs{zlib_lib}=$1;
+@@ -919,14 +924,14 @@
+ 
+ $target{exe_extension}="";
+ $target{exe_extension}=".exe" if ($config{target} eq "DJGPP"
+-                                  || $config{target} =~ /^(?:Cygwin|mingw)/);
++                                  || $config{target} =~ /^(?:Cygwin|mingw|Msys)/);
+ $target{exe_extension}=".pm"  if ($config{target} =~ /vos/);
+ 
+ ($target{shared_extension_simple}=$target{shared_extension})
+     =~ s|\.\$\(SHLIB_MAJOR\)\.\$\(SHLIB_MINOR\)||;
+ $target{dso_extension}=$target{shared_extension_simple};
+ ($target{shared_import_extension}=$target{shared_extension_simple}.".a")
+-    if ($config{target} =~ /^(?:Cygwin|mingw)/);
++    if ($config{target} =~ /^(?:Cygwin|mingw|Msys)/);
+ 
+ 
+ $config{cross_compile_prefix} = $ENV{'CROSS_COMPILE'}
+--- a/Configurations/unix-Makefile.tmpl	2018-03-27 15:50:37.000000000 +0200
++++ b/Configurations/unix-Makefile.tmpl	2018-07-29 16:51:57.797106300 +0200
+@@ -153,8 +153,13 @@
+               -d "$prefix/lib$target{multilib}" ? $target{multilib} : "";
+           our $libdir = $config{libdir} || "lib$multilib";
+           $libdir -}
+-ENGINESDIR={- use File::Spec::Functions;
+-              catdir($prefix,$libdir,"engines-$sover") -}
++ENGINESDIR={- #
++              use File::Spec::Functions;
++              our $enginesdir =
++                  $config{enginesdir} ?
++                    $config{enginesdir}
++                    : catdir($prefix,$libdir,"engines-$sover");
++              $enginesdir -}
+ 
+ # Convenience variable for those who want to set the rpath in shared
+ # libraries and applications
